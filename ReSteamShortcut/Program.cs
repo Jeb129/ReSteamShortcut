@@ -1,80 +1,104 @@
-﻿using IWshRuntimeLibrary;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System;
 using System.Text.RegularExpressions;
+using IWshRuntimeLibrary;
 
 namespace ReSteamShortcut
 {
-    internal class Program
+    public class Program
     {
-        
-        static string SteamDir = "";
-        static List<string[]> Apps = new List<string[]>();
-        static string Desktop = @"C:\Users\" + Environment.UserName + @"\Desktop";
-        static void Main(string[] args)
+        static string SteamPath = @"C:\Program Files (x86)\Steam\steam.exe";
+        static readonly string Desktop = @"C:\Users\" + Environment.UserName + @"\Desktop\";
+        static void Main()
         {
-            Console.WriteLine(" You have create steam's shortcuts to desktop before using this!");
-            SteamDir = GetSteamLoc();
-            GetApps();
-            SHChangeNotify(0x8000000, 0x1000, IntPtr.Zero, IntPtr.Zero);
-            foreach (string[] App in Apps)
-                ShortcutCreate(App);
-            Console.WriteLine($" Done. Created {Apps.Count} shortcuts");
-            Console.WriteLine("\n Created by Jeb129\n GitHub: https://github.com/Jeb129/SteamShortCutRe");
-            Console.WriteLine("\n Press any key to close...");
+            UserInteraction();
+            Console.WriteLine("\nPress any key to continue...");
             Console.ReadKey();
         }
-        static string GetSteamLoc()
+        static void UserInteraction()
         {
-            do
+            List<SteamLinkDetails> links = GetSteamLinks();
+            if (links.Count == 0)
             {
-                Console.WriteLine("\n Steam.exe directory:");
-                string a = Console.ReadLine();
-                if (System.IO.File.Exists(a + @"\steam.exe"))
-                    return a;
-                else
-                    Console.WriteLine(" Steam.exe not found!");
+                Console.WriteLine("Before using this app, you have to create Steam shortcuts in your desktop folder");
+                return;
             }
-            while (true);
+            SetupSteamPath();
+            foreach (SteamLinkDetails link in links)
+            {
+                Console.WriteLine($"Creating shortcut for {link.Name}...");
+                System.IO.File.Delete(link.FilePath);
+                CreateShortcut(link);
+            }
+            SHChangeNotify(0x8000000, 0x1000, IntPtr.Zero, IntPtr.Zero);
+
+            Console.WriteLine();
+            Console.WriteLine(
+                $"Done. Created {links.Count} {(links.Count == 1 ? "shortcut" : "shortcuts")}\n"
+
+                + "\nCreated by Jeb129\n"
+                + "GitHub: https://github.com/Jeb129"
+            );
         }
-        static string[] GetAppArgs(string path)
+        static void SetupSteamPath()
         {
-            string[] Source = System.IO.File.ReadLines(path).ToArray();
-            if (Source.Length < 7 && !Regex.IsMatch(Source[5],"steam:"))
+            while (!System.IO.File.Exists(SteamPath))
+            {
+                Console.WriteLine(
+                    $"Could't find \"steam.exe\" in {SteamPath.Replace(@"\steam.exe", "")}" +
+                    "\nWrite path to Steam installation folder:");
+
+                SteamPath = Console.ReadLine() + @"\steam.exe";
+                Console.WriteLine();
+            }
+        }
+        static SteamLinkDetails? GetAppArgs(string path)
+        {
+            string[] fileDetails = System.IO.File.ReadLines(path).ToArray();
+            if (path.Split('.')[1] != "url" 
+                || fileDetails.Length < 7 && !Regex.IsMatch(fileDetails[5], "steam:")) 
                 return null;
-            string Name = path.Replace(Desktop, "").Replace(".url", "");
-            string URL = Source[5].Replace("URL=","");
-            string IconSource = Source[6].Replace("IconFile=","");
-            return new string[] {Name, URL, IconSource};
+
+            return new SteamLinkDetails 
+            { 
+                FilePath = path, 
+                IconPath = fileDetails[6].Replace("IconFile=", ""),
+                Name = path.Replace(Desktop, "").Replace(".url", ""),
+                GameURL = fileDetails[5].Replace("URL=", "")
+            };
         }
-        static void GetApps()
+        static List<SteamLinkDetails> GetSteamLinks()
         {
-            string[] Files = Directory.GetFiles(Desktop);
-            List<string> URLs = new List<string>();
-            foreach (string file in Files)
+            string[] filePaths = Directory.GetFiles(Desktop);
+            List<SteamLinkDetails> list = new List<SteamLinkDetails>();
+            foreach (string filepath in filePaths)
             {
-                if (file.Split('.')[1] != "url") 
-                    continue;
-                string[] LnkInfo = GetAppArgs(file);
-                if (LnkInfo == null)
-                    continue;
-                Apps.Add(LnkInfo);
-                System.IO.File.Delete(file);
+                SteamLinkDetails? linkDetails = GetAppArgs(filepath);
+                if (linkDetails != null)
+                    list.Add((SteamLinkDetails)linkDetails);
             }
+            return list;
         }
-        static void ShortcutCreate(string[] args)
+        static void CreateShortcut(SteamLinkDetails args)
         {
-            WshShell shell = new WshShell();
-            IWshShortcut sc = (IWshShortcut)shell.CreateShortcut(Desktop + args[0] + ".lnk");
-            sc.TargetPath = SteamDir + @"\steam.exe";
-            sc.WorkingDirectory = SteamDir;
-            sc.Arguments = args[1];
-            sc.IconLocation = args[2].Length == 0 ? SteamDir + @"\steam.exe": args[2];
+            IWshShortcut sc = (IWshShortcut)new WshShell().CreateShortcut(Desktop + args.Name + ".lnk");
+            sc.TargetPath = SteamPath;
+            sc.WorkingDirectory = SteamPath.Replace(@"\steam.exe", "");
+            sc.Arguments = args.GameURL;
+            sc.IconLocation = args.IconPath == "" ? SteamPath: args.IconPath;
             sc.Save();
         }
+
         [System.Runtime.InteropServices.DllImport("Shell32.dll")]
         private static extern int SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
+    }
+    public struct SteamLinkDetails
+    {
+        public string FilePath;
+        public string IconPath;
+        public string Name;
+        public string GameURL;
     }
 }
